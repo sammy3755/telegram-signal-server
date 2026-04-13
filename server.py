@@ -1,10 +1,10 @@
 # server.py
-# PRODUCTION-READY Telegram Signal Server ⚡
+# PRODUCTION-READY Telegram Signal Server ⚡ (FIXED SYMBOL MATCH)
+
 import asyncio
 from fastapi import FastAPI
 from pydantic import BaseModel
 import time
-import threading
 import os
 from typing import Dict
 
@@ -15,6 +15,16 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 app = FastAPI(title="Telegram Signal Server ⚡")
 
 signals: Dict[str, dict] = {}
+
+# ================= SYMBOL NORMALIZER =================
+def normalize_symbol(symbol: str) -> str:
+    symbol = symbol.upper()
+
+    for suffix in ["M", ".M", "C", ".C", "S", ".S", "PRO", ".PRO"]:
+        if symbol.endswith(suffix):
+            symbol = symbol.replace(suffix, "")
+
+    return symbol
 
 # ================= SIGNAL MODEL =================
 class Signal(BaseModel):
@@ -35,7 +45,7 @@ def home():
 
 @app.get("/signal")
 def get_signal(symbol: str):
-    symbol = symbol.upper()
+    symbol = normalize_symbol(symbol)
 
     if symbol not in signals:
         return {
@@ -54,7 +64,7 @@ def get_all_signals():
 
 @app.post("/set")
 def set_signal(signal: Signal):
-    symbol = signal.symbol.upper()
+    symbol = normalize_symbol(signal.symbol)
 
     signals[symbol] = {
         "symbol": symbol,
@@ -72,12 +82,13 @@ def set_signal(signal: Signal):
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not set in environment variables")
-    
+
 raw_users = os.getenv("AUTHORIZED_USERS", "")
 
 AUTHORIZED_USERS = (
     [int(x) for x in raw_users.split(",") if x.strip().isdigit()]
-    if raw_users else [])
+    if raw_users else []
+)
 
 telegram_app = None
 
@@ -96,7 +107,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     action = parts[0]
-    symbol = parts[1]
+    raw_symbol = parts[1]
+
+    symbol = normalize_symbol(raw_symbol)
 
     sl = 0
     tp = 0
@@ -118,10 +131,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "id": int(time.time())
     }
 
+    print(f"📡 Telegram Signal: {signals[symbol]}")
+
     await update.message.reply_text(f"✅ {action} {symbol} received")
 
-
-# ================= START BOT PROPERLY =================
+# ================= START TELEGRAM BOT =================
 
 async def start_telegram():
     global telegram_app
@@ -138,12 +152,13 @@ async def start_telegram():
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(start_telegram())
+
 # ================= MAIN =================
 
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("PORT", 8000))  # ✅ dynamic port
+    port = int(os.environ.get("PORT", 8000))
 
     print(f"⚡ Server running on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
