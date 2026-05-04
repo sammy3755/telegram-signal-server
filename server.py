@@ -1,5 +1,4 @@
-# server.py
-# PRODUCTION-READY Telegram Signal Server ⚡ (FIXED SYMBOL MATCH)
+# ================= UPDATED TELEGRAM SIGNAL SERVER =================
 
 import asyncio
 from fastapi import FastAPI
@@ -11,7 +10,7 @@ from typing import Dict
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-# ================= FASTAPI SETUP =================
+# ================= FASTAPI =================
 app = FastAPI(title="Telegram Signal Server ⚡")
 
 signals: Dict[str, dict] = {}
@@ -26,20 +25,12 @@ def normalize_symbol(symbol: str) -> str:
 
     return symbol
 
-# ================= SIGNAL MODEL =================
-class Signal(BaseModel):
-    symbol: str
-    signal: str
-    sl: float = 0
-    tp: float = 0
-
-# ================= API ROUTES =================
+# ================= API =================
 
 @app.get("/")
 def home():
     return {
         "status": "running",
-        "message": "Telegram Signal Server is LIVE 🚀",
         "active_symbols": list(signals.keys())
     }
 
@@ -51,44 +42,21 @@ def get_signal(symbol: str):
         return {
             "symbol": symbol,
             "signal": "none",
-            "sl": 0,
-            "tp": 0,
             "id": 0
         }
 
-    return signals[symbol]
-
-@app.get("/signals")
-def get_all_signals():
-    return signals
-
-@app.post("/set")
-def set_signal(signal: Signal):
-    symbol = normalize_symbol(signal.symbol)
-
-    signals[symbol] = {
-        "symbol": symbol,
-        "signal": signal.signal.lower(),
-        "sl": signal.sl,
-        "tp": signal.tp,
-        "id": int(time.time())
-    }
-
-    print(f"📡 API Signal Set: {signals[symbol]}")
     return signals[symbol]
 
 # ================= TELEGRAM BOT =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set in environment variables")
+    raise ValueError("BOT_TOKEN not set")
 
-raw_users = os.getenv("AUTHORIZED_USERS", "")
-
-AUTHORIZED_USERS = (
-    [int(x) for x in raw_users.split(",") if x.strip().isdigit()]
-    if raw_users else []
-)
+AUTHORIZED_USERS = [
+    int(x) for x in os.getenv("AUTHORIZED_USERS", "").split(",")
+    if x.strip().isdigit()
+]
 
 telegram_app = None
 
@@ -96,46 +64,59 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
     if user_id not in AUTHORIZED_USERS:
-        await update.message.reply_text("❌ Unauthorized user")
+        await update.message.reply_text("❌ Unauthorized")
         return
 
     text = update.message.text.upper().strip()
     parts = text.split()
 
     if len(parts) < 2:
-        await update.message.reply_text("❌ Format: BUY XAUUSD SL=2300 TP=2400")
+        await update.message.reply_text("❌ Format:\nBUY XAUUSD\nCLOSE_ID XAUUSD 12345")
         return
 
     action = parts[0]
-    raw_symbol = parts[1]
+    symbol = normalize_symbol(parts[1])
 
-    symbol = normalize_symbol(raw_symbol)
+    # ===== GENERATE UNIQUE ID =====
+    signal_id = int(time.time())
 
-    sl = 0
-    tp = 0
+    # ===== HANDLE CLOSE_ID =====
+    if action == "CLOSE_ID":
+        if len(parts) < 3:
+            await update.message.reply_text("❌ Provide ID: CLOSE_ID XAUUSD 12345")
+            return
 
-    for part in parts[2:]:
         try:
-            if "SL=" in part:
-                sl = float(part.split("=")[1])
-            elif "TP=" in part:
-                tp = float(part.split("=")[1])
+            signal_id = int(parts[2])
         except:
-            pass
+            await update.message.reply_text("❌ Invalid ID")
+            return
+
+        signals[symbol] = {
+            "symbol": symbol,
+            "signal": "close_id",
+            "id": signal_id
+        }
+
+        print(f"🎯 CLOSE_ID Signal: {signals[symbol]}")
+        await update.message.reply_text(f"🎯 Closing ID {signal_id} on {symbol}")
+        return
+
+    # ===== NORMAL SIGNALS =====
+    if action not in ["BUY", "SELL", "CLOSE"]:
+        await update.message.reply_text("❌ Invalid command")
+        return
 
     signals[symbol] = {
         "symbol": symbol,
         "signal": action.lower(),
-        "sl": sl,
-        "tp": tp,
-        "id": int(time.time())
+        "id": signal_id
     }
 
-    print(f"📡 Telegram Signal: {signals[symbol]}")
+    print(f"📡 Signal: {signals[symbol]}")
+    await update.message.reply_text(f"✅ {action} {symbol}")
 
-    await update.message.reply_text(f"✅ {action} {symbol} received")
-
-# ================= START TELEGRAM BOT =================
+# ================= START TELEGRAM =================
 
 async def start_telegram():
     global telegram_app
@@ -159,6 +140,5 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.environ.get("PORT", 8000))
-
     print(f"⚡ Server running on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
